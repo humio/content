@@ -239,7 +239,7 @@ def humio_list_notifiers(client, args, headers):
     data: Dict[str, str] = {}
     url = "/api/v1/repositories/" + args.get("repository") + "/alertnotifiers"
     headers["Accept"] = "application/json"
-    response = client.http_request("GET", url, data, headers)
+    response = client.http_request("POST", url, data, headers)
     if response.status_code == 200:
         result = response.json()
         markdown = tableToMarkdown("Humio Notifiers", result, removeNull=True)
@@ -247,6 +247,36 @@ def humio_list_notifiers(client, args, headers):
         return markdown, outputs, result
     else:
         raise ValueError("Error:" + " response from server was: " + str(response.text))
+
+
+def humio_list_actions(client, args, headers):
+    url = "/graphql"
+    headers["Accept"] = "application/json"
+
+    graphql_query = """
+    query{searchDomain(name:"{repoName}"){actions{__typename,id, name 
+        ... on EmailAction{id, name, recipients, subjectTemplate, emailBodyTemplate: bodyTemplate, useProxy, attachCsv}
+        ... on SlackAction{url, fields{fieldName, value}, useProxy}
+        ... on SlackPostMessageAction{apiToken, channels, fields{fieldName, value}, useProxy}
+        ... on WebhookAction{method, url, webhookBodyTemplate: bodyTemplate, headers{header,value}, ignoreSSL, useProxy}
+        ... on OpsGenieAction{apiUrl, genieKey, useProxy}
+        ... on VictorOpsAction{messageType, notifyUrl, useProxy}
+        ... on PagerDutyAction{severity, routingKey, useProxy}
+        ... on HumioRepoAction{ingestToken}
+        ... on UploadFileAction{fileName}}}}
+    """.format(repoName=args.get("repository"))
+
+    data = {"query" : graphql_query}
+    json_data = json.dumps(data)
+
+    response = client.http_request("POST", url, json_data, headers).json()
+    if not response.get("data"):
+        raise ValueError(f"Failed to execute request: {response['errors'][0]['message']}")
+    
+    actions = response["data"]["actions"]
+    markdown = tableToMarkdown("Humio Actions", actions, removeNull=True)
+    outputs = {"Humio.Action(val.id == obj.id)": actions}
+    return markdown, outputs, actions
 
 
 def humio_get_notifier_by_id(client, args, headers):
@@ -269,6 +299,35 @@ def humio_get_notifier_by_id(client, args, headers):
     else:
         raise ValueError("Error:" + " response from server was: " + str(response.text))
 
+def humio_get_action_by_id(client, args, headers):
+    url = "/graphql"
+    graphql_query = """
+    query{searchDomain(name:"{repoName}"){action(id:"{id}"){__typename,id, name 
+        ... on EmailAction{id, name, recipients, subjectTemplate, emailBodyTemplate: bodyTemplate, useProxy, attachCsv}
+        ... on SlackAction{url, fields{fieldName, value}, useProxy}
+        ... on SlackPostMessageAction{apiToken, channels, fields{fieldName, value}, useProxy}
+        ... on WebhookAction{method, url, webhookBodyTemplate: bodyTemplate, headers{header,value}, ignoreSSL, useProxy}
+        ... on OpsGenieAction{apiUrl, genieKey, useProxy}
+        ... on VictorOpsAction{messageType, notifyUrl, useProxy}
+        ... on PagerDutyAction{severity, routingKey, useProxy}
+        ... on HumioRepoAction{ingestToken}
+        ... on UploadFileAction{fileName}}}}
+    """.format(repoName=args.get("repository"), id=args.get("id"))
+
+
+    headers["Accept"] = "application/json"
+
+    data = {"query" : graphql_query}
+    json_data = json.dumps(data)
+
+    response = client.http_request("POST", url, json_data, headers).json()
+    if not response.get("data"):
+        raise ValueError(f"Failed to execute request: {response['errors'][0]['message']}")
+    
+    actions = response["data"]["actions"]
+    markdown = tableToMarkdown("Humio Actions", actions, removeNull=True)
+    outputs = {"Humio.Action(val.id == obj.id)": actions}
+    return markdown, outputs, actions
 
 def fetch_incidents(client, headers):
     incidentquery = demisto.params().get("queryParameter")
@@ -371,8 +430,10 @@ def main():
             "humio-get-alert-by-id": humio_get_alert_by_id,
             "humio-create-alert": humio_create_alert,
             "humio-delete-alert": humio_delete_alert,
-            "humio-list-notifiers": humio_list_notifiers,
-            "humio-get-notifier-by-id": humio_get_notifier_by_id,
+            "humio-list-notifiers": humio_list_actions,
+            "humio-get-notifier-by-id": humio_get_action_by_id,
+            "humio-list-actions": humio_list_actions,
+            "humio-get-action-by-id": humio_get_action_by_id,
         }
         if command == "test-module":
             results = test_module(client, headers)
